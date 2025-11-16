@@ -35,10 +35,11 @@ def scrape_laundry_news():
     seen = set()
     
     try:
-        for page in range(1, 50):  # Första 50 sidorna
+        max_pages = 657  # Totalt antal sidor
+        for page in range(1, max_pages + 1):
             try:
                 scrape_status["current_page"] = page
-                scrape_status["progress"] = f"Scrapar sida {page}/50..."
+                scrape_status["progress"] = f"Scrapar sida {page}/{max_pages}..."
                 
                 url = f"https://thelaundrynews.com/page/{page}/" if page > 1 else "https://thelaundrynews.com/"
                 
@@ -117,8 +118,16 @@ def scrape_laundry_news():
                 
                 scrape_status["total_articles"] = len(articles)
                 
-                if page % 10 == 0:
+                # Spara progress varje 25:e sida
+                if page % 25 == 0:
                     print(f"   Scrapade {page} sidor, {len(articles)} artiklar hittills...")
+                    with open('articles.json', 'w', encoding='utf-8') as f:
+                        json.dump(articles, f, ensure_ascii=False, indent=2)
+                    articles_cache = articles
+                
+                # Liten paus för att inte överbelasta servern
+                if page % 10 == 0:
+                    time.sleep(1)
                 
             except Exception as e:
                 print(f"   Fel på sida {page}: {e}")
@@ -215,7 +224,7 @@ def index():
                 <h1>⏳ Scraping pågår...</h1>
                 <div class="loader"></div>
                 <p style="font-size: 1.2em; margin: 20px 0;">{scrape_status['progress']}</p>
-                <p>Sida: {scrape_status['current_page']}/50</p>
+                <p>Sida: {scrape_status['current_page']}/657</p>
                 <p>Artiklar hittade: {scrape_status['total_articles']}</p>
                 <p style="opacity: 0.7; margin-top: 20px;">Sidan uppdateras automatiskt var 5:e sekund...</p>
             </div>
@@ -390,6 +399,42 @@ def index():
                 color: #2a5298;
                 font-size: 0.85em;
             }
+            .filters {
+                padding: 20px 30px;
+                background: #e9ecef;
+                border-bottom: 2px solid #dee2e6;
+            }
+            .filter-group {
+                margin-bottom: 15px;
+            }
+            .filter-label {
+                font-weight: 600;
+                color: #1e3c72;
+                margin-right: 10px;
+                display: inline-block;
+                min-width: 100px;
+            }
+            .filter-btn {
+                background: white;
+                border: 2px solid #2a5298;
+                color: #2a5298;
+                padding: 8px 16px;
+                margin: 4px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 0.9em;
+                transition: all 0.3s;
+            }
+            .filter-btn:hover {
+                background: #f0f0f0;
+            }
+            .filter-btn.active {
+                background: #2a5298;
+                color: white;
+            }
+            .hidden {
+                display: none !important;
+            }
         </style>
     </head>
     <body>
@@ -417,6 +462,55 @@ def index():
                     <div class="stat-value">""" + str(len([a for a in articles if a.get('severity') == 'high'])) + """</div>
                     <div class="stat-label">🔴 Högrisk</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-value">""" + str(len([a for a in articles if 'kryptovalutor' in a.get('modus', [])])) + """</div>
+                    <div class="stat-label">₿ Krypto</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">""" + str(len([a for a in articles if 'fastigheter' in a.get('modus', [])])) + """</div>
+                    <div class="stat-label">🏢 Fastigheter</div>
+                </div>
+            </div>
+            
+            <div class="filters">
+                <div class="filter-group">
+                    <span class="filter-label">Källtyp:</span>
+                    <button class="filter-btn active" onclick="filterByType('all')">Alla</button>
+                    <button class="filter-btn" onclick="filterByType('official')">🏛️ Officiellt</button>
+                    <button class="filter-btn" onclick="filterByType('news')">📰 Nyheter</button>
+                    <button class="filter-btn" onclick="filterByType('report')">📋 Rapporter</button>
+                    <button class="filter-btn" onclick="filterByType('unknown')">❓ Okänd</button>
+                </div>
+                <div class="filter-group">
+                    <span class="filter-label">Allvarlighetsgrad:</span>
+                    <button class="filter-btn active" onclick="filterBySeverity('all')">Alla</button>
+                    <button class="filter-btn" onclick="filterBySeverity('high')">🔴 Hög risk</button>
+                    <button class="filter-btn" onclick="filterBySeverity('medium')">🟡 Medel risk</button>
+                </div>
+                <div class="filter-group">
+                    <span class="filter-label">Ämne:</span>
+                    <button class="filter-btn active" onclick="filterByTopic('all')">Alla</button>
+                    <button class="filter-btn" onclick="filterByTopic('fraud')">Bedrägeri</button>
+                    <button class="filter-btn" onclick="filterByTopic('crime')">Brottslighet</button>
+                    <button class="filter-btn" onclick="filterByTopic('corruption')">Korruption</button>
+                </div>
+                <div class="filter-group">
+                    <span class="filter-label">Penningtvättsmodus:</span>
+                    <button class="filter-btn active" onclick="filterByModus('all')">Alla</button>
+                    <button class="filter-btn" onclick="filterByModus('fastigheter')">🏢 Fastigheter</button>
+                    <button class="filter-btn" onclick="filterByModus('kryptovalutor')">₿ Kryptovalutor</button>
+                    <button class="filter-btn" onclick="filterByModus('lyxvaror')">💎 Lyxvaror</button>
+                    <button class="filter-btn" onclick="filterByModus('guld-ädelmetall')">🥇 Guld/Ädelmetall</button>
+                    <button class="filter-btn" onclick="filterByModus('banker-skalbolag')">🏦 Banker/Skalbolag</button>
+                    <button class="filter-btn" onclick="filterByModus('lån')">💳 Lån</button>
+                    <button class="filter-btn" onclick="filterByModus('spel-kasino')">🎰 Spel/Kasino</button>
+                    <button class="filter-btn" onclick="filterByModus('handelsbaserat')">📦 Handelsbaserat</button>
+                    <button class="filter-btn" onclick="filterByModus('hawala-kontanter')">💵 Hawala/Kontanter</button>
+                    <button class="filter-btn" onclick="filterByModus('kontantintensiva')">🍽️ Kontantintensiva</button>
+                    <button class="filter-btn" onclick="filterByModus('företag')">🏭 Företag</button>
+                    <button class="filter-btn" onclick="filterByModus('välgörenhet')">❤️ Välgörenhet</button>
+                    <button class="filter-btn" onclick="filterByModus('försäkring-fonder')">📊 Försäkring/Fonder</button>
+                </div>
             </div>
             
             <div class="content">
@@ -432,14 +526,56 @@ def index():
             title_html = f'<a href="{a["url"]}" target="_blank">{a["title"]} ↗</a>'
         
         st = a.get('source_type', 'unknown')
+        severity = a.get('severity', 'medium')
+        topic = a.get('topic', 'crime')
+        modus_list = a.get('modus', ['övrigt'])
+        modus_str = ','.join(modus_list)
         
         html += f"""
-                <div class="article">
+                <div class="article" data-type="{st}" data-severity="{severity}" data-topic="{topic}" data-modus="{modus_str}">
                     <div class="article-title">{title_html}</div>
                     <div class="article-meta">
                         <span class="article-source">{a['source']}</span>
                         <span>{a['date']}</span>
                         <span class="source-badge">{type_emoji[st]} {type_name[st]}</span>
+        """
+        
+        # Lägg till modus-badges
+        modus_emoji = {
+            'fastigheter': '🏢',
+            'kryptovalutor': '₿',
+            'lyxvaror': '💎',
+            'guld-ädelmetall': '🥇',
+            'banker-skalbolag': '🏦',
+            'lån': '💳',
+            'spel-kasino': '🎰',
+            'handelsbaserat': '📦',
+            'hawala-kontanter': '💵',
+            'kontantintensiva': '🍽️',
+            'företag': '🏭',
+            'välgörenhet': '❤️',
+            'försäkring-fonder': '📊',
+            'övrigt': '❓'
+        }
+        
+        for m in modus_list:
+            emoji = modus_emoji.get(m, '❓')
+            html += f'<span class="source-badge" style="background: #fff3cd; color: #856404;">{emoji} {m.title()}</span>'
+        
+        html += """
+                    </div>
+        """
+        
+        # Visa primärkälla-länk tydligt
+        if a.get('url'):
+            html += f"""
+                    <div style="margin-top: 10px; padding: 8px; background: #e8f4f8; border-radius: 4px;">
+                        <strong>🔗 Primärkälla:</strong> <a href="{a['url']}" target="_blank" style="color: #0066cc; text-decoration: none;">{a['url']}</a>
+                    </div>
+            """
+        
+        html += """
+                </div>
         """
         
         if a.get('url'):
@@ -453,6 +589,92 @@ def index():
     html += """
             </div>
         </div>
+        <script>
+            let currentType = 'all';
+            let currentSeverity = 'all';
+            let currentTopic = 'all';
+            let currentModus = 'all';
+            
+            function filterByType(type) {
+                currentType = type;
+                applyFilters();
+                updateActiveButton('type', type);
+            }
+            
+            function filterBySeverity(severity) {
+                currentSeverity = severity;
+                applyFilters();
+                updateActiveButton('severity', severity);
+            }
+            
+            function filterByTopic(topic) {
+                currentTopic = topic;
+                applyFilters();
+                updateActiveButton('topic', topic);
+            }
+            
+            function filterByModus(modus) {
+                currentModus = modus;
+                applyFilters();
+                updateActiveButton('modus', modus);
+            }
+            
+            function applyFilters() {
+                const articles = document.querySelectorAll('.article');
+                let visibleCount = 0;
+                
+                articles.forEach(article => {
+                    const type = article.dataset.type;
+                    const severity = article.dataset.severity;
+                    const topic = article.dataset.topic;
+                    const modusList = article.dataset.modus ? article.dataset.modus.split(',') : [];
+                    
+                    const typeMatch = currentType === 'all' || type === currentType;
+                    const severityMatch = currentSeverity === 'all' || severity === currentSeverity;
+                    const topicMatch = currentTopic === 'all' || topic === currentTopic;
+                    const modusMatch = currentModus === 'all' || modusList.includes(currentModus);
+                    
+                    if (typeMatch && severityMatch && topicMatch && modusMatch) {
+                        article.classList.remove('hidden');
+                        visibleCount++;
+                    } else {
+                        article.classList.add('hidden');
+                    }
+                });
+                
+                console.log(`Visar ${visibleCount} artiklar`);
+            }
+            
+            function updateActiveButton(filterType, value) {
+                const buttons = document.querySelectorAll('.filter-btn');
+                buttons.forEach(btn => {
+                    const onclick = btn.getAttribute('onclick');
+                    if (onclick) {
+                        if (filterType === 'type' && onclick.includes('filterByType')) {
+                            btn.classList.remove('active');
+                            if (onclick.includes(`'${value}'`)) {
+                                btn.classList.add('active');
+                            }
+                        } else if (filterType === 'severity' && onclick.includes('filterBySeverity')) {
+                            btn.classList.remove('active');
+                            if (onclick.includes(`'${value}'`)) {
+                                btn.classList.add('active');
+                            }
+                        } else if (filterType === 'topic' && onclick.includes('filterByTopic')) {
+                            btn.classList.remove('active');
+                            if (onclick.includes(`'${value}'`)) {
+                                btn.classList.add('active');
+                            }
+                        } else if (filterType === 'modus' && onclick.includes('filterByModus')) {
+                            btn.classList.remove('active');
+                            if (onclick.includes(`'${value}'`)) {
+                                btn.classList.add('active');
+                            }
+                        }
+                    }
+                });
+            }
+        </script>
     </body>
     </html>
     """
