@@ -1,9 +1,6 @@
-flask==3.0.0
-flask-sqlalchemy==3.1.1
-flask-apscheduler==1.13.1
-requests==2.31.0
-beautifulsoup4==4.12.2
-gunicorn==21.2.0
-reportlab==4.0.7
-openpyxl==3.1.2
-werkzeug==3.0.1
+flask
+gunicorn
+requests
+beautifulsoup4
+pandas
+openpyxl
