@@ -3,10 +3,12 @@ import json
 import requests
 from bs4 import BeautifulSoup
 import re
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, send_file
 from datetime import datetime
 import threading
 import time
+import pandas as pd
+from io import BytesIO
 
 app = Flask(__name__)
 
@@ -93,6 +95,51 @@ def scrape_laundry_news():
                             else:
                                 topic, severity = 'crime', 'medium'
                             
+                            # Identifiera penningtvättsmodus
+                            combined_text = (title + ' ' + potential_source).lower()
+                            modus = []
+                            
+                            # Fastigheter & Lyxvaror
+                            if any(w in combined_text for w in ['property', 'real estate', 'housing', 'apartment', 'villa', 'building', 'land']):
+                                modus.append('fastigheter')
+                            if any(w in combined_text for w in ['luxury', 'yacht', 'jet', 'watch', 'jewel', 'art', 'painting', 'car', 'vehicle', 'supercar', 'ferrari', 'lamborghini']):
+                                modus.append('lyxvaror')
+                            if any(w in combined_text for w in ['gold', 'diamond', 'precious metal', 'bullion']):
+                                modus.append('guld-ädelmetall')
+                            
+                            # Finansiella system
+                            if any(w in combined_text for w in ['crypto', 'bitcoin', 'blockchain', 'cryptocurrency', 'digital currency', 'token', 'nft']):
+                                modus.append('kryptovalutor')
+                            if any(w in combined_text for w in ['bank', 'account', 'transfer', 'wire', 'swift', 'offshore', 'shell company', 'nominee']):
+                                modus.append('banker-skalbolag')
+                            if any(w in combined_text for w in ['loan', 'mortgage', 'credit', 'debt', 'lending']):
+                                modus.append('lån')
+                            if any(w in combined_text for w in ['casino', 'gambling', 'betting', 'poker']):
+                                modus.append('spel-kasino')
+                            
+                            # Handel & Business
+                            if any(w in combined_text for w in ['trade', 'export', 'import', 'invoice', 'overvaluation', 'undervaluation', 'mis-invoicing']):
+                                modus.append('handelsbaserat')
+                            if any(w in combined_text for w in ['hawala', 'cash courier', 'money service', 'remittance', 'exchange']):
+                                modus.append('hawala-kontanter')
+                            if any(w in combined_text for w in ['company', 'business', 'corporate', 'subsidiary', 'front business']):
+                                modus.append('företag')
+                            
+                            # Specifika branscher
+                            if any(w in combined_text for w in ['restaurant', 'bar', 'nightclub', 'salon', 'carwash']):
+                                modus.append('kontantintensiva')
+                            if any(w in combined_text for w in ['charity', 'foundation', 'ngo', 'non-profit']):
+                                modus.append('välgörenhet')
+                            if any(w in combined_text for w in ['insurance', 'pension', 'investment fund', 'hedge fund']):
+                                modus.append('försäkring-fonder')
+                            
+                            # Om inget modus hittades
+                            if not modus:
+                                modus.append('övrigt')
+                            
+                            # Ta bara unika modus
+                            modus = list(set(modus))
+                            
                             # Källtyp
                             sl = potential_source.lower()
                             if any(w in sl for w in ['eppo', 'europol', 'fca', 'gov']):
@@ -111,7 +158,8 @@ def scrape_laundry_news():
                                 'url': url,
                                 'source_type': source_type,
                                 'topic': topic,
-                                'severity': severity
+                                'severity': severity,
+                                'modus': modus
                             })
                             
                             seen.add(title)
@@ -307,10 +355,14 @@ def index():
                 position: relative;
             }
             h1 { font-size: 2.8em; margin-bottom: 10px; }
-            .refresh-btn {
+            .header-buttons {
                 position: absolute;
                 top: 20px;
                 right: 20px;
+                display: flex;
+                gap: 10px;
+            }
+            .refresh-btn, .export-btn {
                 background: rgba(255,255,255,0.2);
                 color: white;
                 border: 2px solid white;
@@ -318,8 +370,10 @@ def index():
                 border-radius: 8px;
                 cursor: pointer;
                 font-size: 1em;
+                text-decoration: none;
+                display: inline-block;
             }
-            .refresh-btn:hover {
+            .refresh-btn:hover, .export-btn:hover {
                 background: rgba(255,255,255,0.3);
             }
             .stats {
@@ -440,7 +494,11 @@ def index():
     <body>
         <div class="container">
             <header>
-                <button class="refresh-btn" onclick="window.location.href='/start-scrape'">🔄 Ny scraping</button>
+                <div class="header-buttons">
+                    <a href="/export/excel" class="export-btn">📥 Ladda ner Excel</a>
+                    <a href="/export/csv" class="export-btn">📥 Ladda ner CSV</a>
+                    <button class="refresh-btn" onclick="window.location.href='/start-scrape'">🔄 Ny scraping</button>
+                </div>
                 <h1>🔍 The Laundry News</h1>
                 <p style="opacity: 0.9; font-size: 1.1em;">Auto-scrapade artiklar med källänkar</p>
             </header>
@@ -577,14 +635,6 @@ def index():
         html += """
                 </div>
         """
-        
-        if a.get('url'):
-            html += f'<span class="link-icon">🔗 Originallänk</span>'
-        
-        html += """
-                    </div>
-                </div>
-        """
     
     html += """
             </div>
@@ -705,6 +755,91 @@ def start_scrape():
     </body>
     </html>
     """
+
+@app.route('/export/excel')
+def export_excel():
+    """Exportera alla artiklar till Excel"""
+    global articles_cache
+    
+    if not articles_cache:
+        return "<h1>❌ Ingen data att exportera. Starta scraping först!</h1>"
+    
+    # Skapa DataFrame
+    export_data = []
+    for article in articles_cache:
+        export_data.append({
+            'Källa': article.get('source', ''),
+            'Rubrik': article.get('title', ''),
+            'Länk': article.get('url', ''),
+            'Datum': article.get('date', ''),
+            'Källtyp': article.get('source_type', ''),
+            'Ämne': article.get('topic', ''),
+            'Allvarlighetsgrad': article.get('severity', ''),
+            'Penningtvättsmodus': ', '.join(article.get('modus', []))
+        })
+    
+    df = pd.DataFrame(export_data)
+    
+    # Skapa Excel-fil i minnet
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Artiklar')
+        
+        # Justera kolumnbredd
+        worksheet = writer.sheets['Artiklar']
+        worksheet.column_dimensions['A'].width = 30  # Källa
+        worksheet.column_dimensions['B'].width = 80  # Rubrik
+        worksheet.column_dimensions['C'].width = 60  # Länk
+        worksheet.column_dimensions['D'].width = 15  # Datum
+        worksheet.column_dimensions['E'].width = 15  # Källtyp
+        worksheet.column_dimensions['F'].width = 15  # Ämne
+        worksheet.column_dimensions['G'].width = 20  # Allvarlighetsgrad
+        worksheet.column_dimensions['H'].width = 40  # Modus
+    
+    output.seek(0)
+    
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'laundry_news_artiklar_{datetime.now().strftime("%Y%m%d")}.xlsx'
+    )
+
+@app.route('/export/csv')
+def export_csv():
+    """Exportera alla artiklar till CSV"""
+    global articles_cache
+    
+    if not articles_cache:
+        return "<h1>❌ Ingen data att exportera. Starta scraping först!</h1>"
+    
+    # Skapa DataFrame
+    export_data = []
+    for article in articles_cache:
+        export_data.append({
+            'Källa': article.get('source', ''),
+            'Rubrik': article.get('title', ''),
+            'Länk': article.get('url', ''),
+            'Datum': article.get('date', ''),
+            'Källtyp': article.get('source_type', ''),
+            'Ämne': article.get('topic', ''),
+            'Allvarlighetsgrad': article.get('severity', ''),
+            'Penningtvättsmodus': ', '.join(article.get('modus', []))
+        })
+    
+    df = pd.DataFrame(export_data)
+    
+    # Skapa CSV i minnet
+    output = BytesIO()
+    df.to_csv(output, index=False, encoding='utf-8-sig')  # utf-8-sig för Excel-kompatibilitet
+    output.seek(0)
+    
+    return send_file(
+        output,
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name=f'laundry_news_artiklar_{datetime.now().strftime("%Y%m%d")}.csv'
+    )
 
 @app.route('/api/articles')
 def api_articles():
